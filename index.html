@@ -510,7 +510,7 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.1</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.2</p>
   </div>`;
 }
 
@@ -766,7 +766,8 @@ document.addEventListener('change', e => {
 
 render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).then(r => r.update()).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!window.__swReload) { window.__swReload = 1; location.reload(); } });
 </script>
 </body>
 </html>
