@@ -18,7 +18,9 @@
 html{touch-action:manipulation;-webkit-text-size-adjust:100%}
 body.lock{overflow:hidden}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif}
-body{padding-bottom:calc(80px + env(safe-area-inset-bottom))}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#app{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 button{font:inherit;color:inherit;cursor:pointer}
 select,input,textarea{font:inherit;color:inherit}
 .top{background:linear-gradient(160deg,#5e1029,#8e1b3a);color:#fff;padding:calc(18px + env(safe-area-inset-top)) 18px 16px}
@@ -46,7 +48,7 @@ select,input,textarea{font:inherit;color:inherit}
 .qty{min-width:38px;height:38px;border-radius:50%;background:#f3e9e4;display:grid;place-items:center;font-weight:700;color:var(--wine);flex:none}
 .qty.zero{background:#eee;color:#aaa}
 .empty{text-align:center;color:var(--muted);padding:36px 20px}
-.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:10}
+.tabs{position:relative;flex:none;display:flex;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:10}
 .tabs button{flex:1;border:0;background:none;padding:8px 0 6px;min-height:52px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
 .tabs svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tabs button.on{color:var(--wine)}
@@ -200,6 +202,10 @@ function load(){
 }
 function migrate(s){
   s.casiers.forEach(c => { if (!c.style) c.style = c.rangees ? 'bois' : 'libre'; if (!c.sens) c.sens = 'haut'; if (!c.lignes) c.lignes = 1; });
+  s.vins.forEach(v => {
+    const c = s.casiers.find(x => x.id === v.casierId);
+    if (c && c.rangees && c.lignes > 1 && v.cases) v.cases = v.cases.filter(k => { const [i, col] = k.split(',').map(Number); return !((i % c.lignes) % 2 === 1 && col === c.colonnes - 1); });
+  });
   return s;
 }
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){ toast('Erreur de sauvegarde'); } }
@@ -217,6 +223,10 @@ const colOf = v => (COUL[v.couleur] || COUL.rouge).c;
 const styleOf = c => !c || !c.rangees ? 'libre' : (STYLES[c.style] && c.style !== 'libre' ? c.style : 'bois');
 const nbL = c => Math.max(1, c.lignes || 1);
 const nbE = c => Math.round(c.rangees / nbL(c));
+// En quinconce : les lignes impaires (2e, 4e en partant du bas) sont décalées d'une demi-bouteille et ont une place de moins
+const isStag = (c, i) => (i % nbL(c)) % 2 === 1;
+const validCell = (c, k) => { const [i, col] = k.split(',').map(Number); return i < c.rangees && col < c.colonnes && !(isStag(c, i) && col === c.colonnes - 1); };
+const capacity = c => c.rangees ? nbE(c) * (nbL(c) * c.colonnes - Math.floor(nbL(c) / 2)) : 0;
 const etageNum = (c, i) => { const e = Math.floor(i / nbL(c)); return c.sens === 'bas' ? nbE(c) - e : e + 1; };
 const LIGNES = {2:['bas','haut'], 3:['bas','milieu','haut']};
 const ligneName = (c, i) => { const L = nbL(c); if (L === 1) return ''; const lb = i % L; return LIGNES[L] ? LIGNES[L][lb] : 'L' + (lb + 1); };
@@ -378,7 +388,7 @@ function drawCasier(c, o = {}){
   const LM = mini ? 4 : 40, TM = mini ? 4 : 16;
   const s = Math.min(46, (360 - 2*LM - 2*fr - 2*pad) / C);
   const plank = st === 'frigo' ? 5 : (st === 'etagere' ? 7 : 6);
-  const lineH = s * .88;                       // lignes empilées légèrement imbriquées
+  const lineH = s * .87;                       // quinconce : la ligne du dessus se loge dans les creux
   const rowH = s + (L - 1) * lineH + plank + 3;   // hauteur d'un étage
   const headIn = st === 'frigo' ? 12 : 0, footIn = st === 'frigo' ? 26 : 0;
   const cabW = C*s + 2*pad + 2*fr, cabH = 2*fr + headIn + E*rowH + footIn;
@@ -391,7 +401,7 @@ function drawCasier(c, o = {}){
     g += `<rect x="${cx+6}" y="${cy+cabH-2}" width="12" height="8" fill="#5e3a1c"/><rect x="${cx+cabW-18}" y="${cy+cabH-2}" width="12" height="8" fill="#5e3a1c"/>`;
     g += `<rect x="${cx}" y="${cy}" width="${f1(cabW)}" height="${f1(cabH)}" rx="5" fill="url(#gWood)"/>`;
     g += `<rect x="${ix}" y="${iy}" width="${f1(iw)}" height="${f1(ih)}" rx="2" fill="url(#gIn)"/>`;
-    for (let j = 1; j < C; j++) g += `<line x1="${f1(ix+pad+j*s)}" y1="${iy}" x2="${f1(ix+pad+j*s)}" y2="${f1(iy+ih)}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`;
+    if (L === 1) for (let j = 1; j < C; j++) g += `<line x1="${f1(ix+pad+j*s)}" y1="${iy}" x2="${f1(ix+pad+j*s)}" y2="${f1(iy+ih)}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`;
   } else if (st === 'frigo') {
     g += `<rect x="${cx+10}" y="${cy+cabH-2}" width="14" height="8" rx="2" fill="#18191c"/><rect x="${cx+cabW-24}" y="${cy+cabH-2}" width="14" height="8" rx="2" fill="#18191c"/>`;
     g += `<rect x="${cx}" y="${cy}" width="${f1(cabW)}" height="${f1(cabH)}" rx="12" fill="#2b2d31"/>`;
@@ -418,9 +428,10 @@ function drawCasier(c, o = {}){
       if (L > 1) g += `<text x="${cx-6}" y="${f1(my + 12)}" text-anchor="end" font-size="8.5" font-family="-apple-system,Segoe UI,sans-serif" fill="#a8999d">${L} lignes</text>`;
     }
     for (let lt = 0; lt < L; lt++) {             // de la ligne du haut vers celle du bas
-    const i = i0 + (L - 1 - lt), by = ry + 2 + lt*lineH + s/2;
+    const i = i0 + (L - 1 - lt), by = ry + 2 + lt*lineH + s/2, stag = isStag(c, i);
     for (let j = 0; j < C; j++) {
-      const bx = ix + pad + j*s + s/2, r = s*.42, k = i + ',' + j, v = occ.get(k);
+      if (stag && j === C - 1) continue;
+      const bx = ix + pad + j*s + s/2 + (stag ? s/2 : 0), r = s*.42, k = i + ',' + j, v = occ.get(k);
       const hit = `<rect x="${f1(bx-s/2)}" y="${f1(by-s/2)}" width="${f1(s)}" height="${f1(s)}" fill="transparent"/>`;
       const ring = `<circle class="ring" cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="3"/>`;
       if (mini) g += v ? bottleSVG(bx, by, r, v.couleur) : emptySVG(bx, by, r, dark);
@@ -464,14 +475,14 @@ function vPlan(){
     h += `<div class="empty"><div style="font-size:42px">🗄️</div><p>Décris ta cave : crée un casier par meuble ou étagère (nombre de rangées × colonnes), ou une zone libre pour un carton, un placard…</p>
       <button class="btn p" data-act="newcas">Créer mon premier casier</button></div>`;
   }
-  const info = c => c.rangees ? `${occupancy(c.id).size}/${c.rangees * c.colonnes}` : plural(sum(S.vins.filter(v => v.casierId === c.id).map(v => v.qte)), 'bt', 'bts');
+  const info = c => c.rangees ? `${occupancy(c.id).size}/${capacity(c)}` : plural(sum(S.vins.filter(v => v.casierId === c.id).map(v => v.qte)), 'bt', 'bts');
   if (S.casiers.length > 1) {
     h += `<div class="overview">${S.casiers.map(c => `<button class="ov" data-act="goto" data-id="${c.id}">${c.rangees ? drawCasier(c, {mini:1}) : drawBox(S.vins.filter(v => v.casierId === c.id && v.qte > 0))}<b>${esc(c.nom)}</b><span>${info(c)}</span></button>`).join('')}</div>`;
   }
   S.casiers.forEach(c => {
     const inC = S.vins.filter(v => v.casierId === c.id && v.qte > 0);
     if (c.rangees) {
-      const occ = occupancy(c.id).size, cap = c.rangees * c.colonnes;
+      const occ = occupancy(c.id).size, cap = capacity(c);
       h += `<div class="card" id="cas-${c.id}"><div class="ph"><div><b>${esc(c.nom)}</b><br><small>${STYLES[styleOf(c)].l} · ${occ}/${cap} places occupées</small></div><button class="ic" data-act="editcas" data-id="${c.id}">Modifier</button></div>${drawCasier(c)}</div>`;
     } else {
       h += `<div class="card" id="cas-${c.id}"><div class="ph"><div><b>${esc(c.nom)}</b><br><small>Zone libre · ${plural(sum(inC.map(v=>v.qte)),'bouteille')}</small></div><button class="ic" data-act="editcas" data-id="${c.id}">Modifier</button></div>
@@ -518,7 +529,7 @@ function vStats(){
 function vReglages(){
   return header('Réglages') + `<div class="wrap">
     <h3>Casiers et zones</h3>
-    ${S.casiers.map(c => `<div class="item" data-act="editcas" data-id="${c.id}"><span style="font-size:20px">${STYLES[styleOf(c)].i}</span><div class="main"><div class="t">${esc(c.nom)}</div><div class="s">${c.rangees ? `${STYLES[styleOf(c)].l} · ${nbE(c)} étages${nbL(c) > 1 ? ' × ' + nbL(c) + ' lignes' : ''} × ${c.colonnes} (${c.rangees*c.colonnes} places)` : 'Zone libre'}</div></div><span class="mini">›</span></div>`).join('')}
+    ${S.casiers.map(c => `<div class="item" data-act="editcas" data-id="${c.id}"><span style="font-size:20px">${STYLES[styleOf(c)].i}</span><div class="main"><div class="t">${esc(c.nom)}</div><div class="s">${c.rangees ? `${STYLES[styleOf(c)].l} · ${nbE(c)} étages${nbL(c) > 1 ? ' × ' + nbL(c) + ' lignes' : ''} × ${c.colonnes} (${capacity(c)} places)` : 'Zone libre'}</div></div><span class="mini">›</span></div>`).join('')}
     <button class="btn" data-act="newcas">＋ Ajouter un meuble ou une zone</button>
     <h3>Sauvegarde</h3>
     <div class="card"><div class="mini">Tes données sont enregistrées uniquement sur cet appareil (rien n'est envoyé sur GitHub). Fais une sauvegarde de temps en temps, dans Fichiers ou iCloud Drive.</div>
@@ -530,7 +541,7 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.3</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.4</p>
   </div>`;
 }
 
@@ -634,7 +645,7 @@ function openCas(id){
       <div><label class="f">Bouteilles par étage</label><input id="c_c" class="in" inputmode="numeric" value="${c.colonnes || 8}"></div>
     </div>
     <label class="f">Lignes de bouteilles par étage</label><div class="seg" id="c_lig">${[1,2,3,4].map(n => `<button type="button" data-act="clig" data-v="${n}" class="${CS.lignes===n?'on':''}">${n === 1 ? '1 ligne' : n + ' lignes'}</button>`).join('')}</div>
-    <div class="note" style="margin-top:4px">Ex. 2 lignes = des bouteilles posées sur l'étagère + une rangée empilée par-dessus.</div>
+    <div class="note" style="margin-top:4px">Ex. 2 lignes = des bouteilles posées sur l'étagère + une rangée empilée par-dessus, en quinconce (une bouteille de moins).</div>
     <label class="f">Numérotation des étages</label><div class="seg" id="c_sens"><button type="button" data-act="csens" data-v="haut" class="${CS.sens==='haut'?'on':''}">Étage 1 en haut</button><button type="button" data-act="csens" data-v="bas" class="${CS.sens==='bas'?'on':''}">Étage 1 en bas</button></div>
     <div class="note">Max 26 étages × 30 bouteilles. Les places sont numérotées de gauche à droite.</div>
     <div id="c_prev"></div></div>
@@ -646,7 +657,7 @@ function openCas(id){
 function casPreview(){
   const el = $('#c_prev'); if (!el || !CS) return;
   const r = Math.min(26, Math.max(1, parseInt($('#c_r').value) || 1)), co = Math.min(30, Math.max(1, parseInt($('#c_c').value) || 1));
-  el.innerHTML = CS.style === 'libre' ? '' : `<label class="f">Aperçu · ${r * CS.lignes * co} places</label><div class="card" style="pointer-events:none">${drawCasier({id:'__apercu', rangees:r * CS.lignes, colonnes:co, lignes:CS.lignes, style:CS.style, sens:CS.sens}, {mini:0})}</div>`;
+  el.innerHTML = CS.style === 'libre' ? '' : `<label class="f">Aperçu · ${r * (CS.lignes * co - Math.floor(CS.lignes / 2))} places</label><div class="card" style="pointer-events:none">${drawCasier({id:'__apercu', rangees:r * CS.lignes, colonnes:co, lignes:CS.lignes, style:CS.style, sens:CS.sens}, {mini:0})}</div>`;
 }
 function saveCas(){
   const nom = $('#c_nom').value.trim(); if (!nom) { toast('Donne un nom au meuble'); return; }
@@ -664,7 +675,7 @@ function saveCas(){
     inside.forEach(v => {
       next[v.id] = (v.cases || []).map(k => {
         const [i, col] = k.split(',').map(Number), e = Math.floor(i / oL), lb = i % oL;
-        if (e >= E || lb >= L || col >= co) { lost++; return null; }
+        if (e >= E || lb >= L || col >= co || (L > 1 && lb % 2 === 1 && col >= co - 1)) { lost++; return null; }
         return (e * L + lb) + ',' + col;
       }).filter(Boolean);
     });
@@ -717,7 +728,7 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const a = b.dataset.act, id = b.dataset.id;
   switch (a) {
-    case 'tab': view = b.dataset.v; closeSheet(); render(); window.scrollTo(0,0); break;
+    case 'tab': view = b.dataset.v; closeSheet(); render(); $('#app').scrollTop = 0; break;
     case 'close': closeSheet(); break;
     case 'new': openForm(null); break;
     case 'open': openDetail(id); break;
