@@ -767,7 +767,7 @@ document.addEventListener('change', e => {
 render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).then(r => r.update()).catch(() => {});
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!window.__swReload) { window.__swReload = 1; location.reload(); } });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('controllerchange', () => { if (!window.__swReload) { window.__swReload = 1; location.reload(); } });
 </script>
 </body>
 </html>
