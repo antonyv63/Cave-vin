@@ -19,7 +19,8 @@ html{touch-action:manipulation;-webkit-text-size-adjust:100%}
 body.lock{overflow:hidden}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif}
 html,body{height:100%;overflow:hidden;overscroll-behavior:none}
-body{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column}
+/* hauteur mesurée en JS (--appH) : contourne le bug d'iOS 26 qui raccourcit l'écran des applis web de ~59 px */
+body{position:relative;display:flex;flex-direction:column;height:var(--appH,100%)}
 #app{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 button{font:inherit;color:inherit;cursor:pointer}
 select,input,textarea{font:inherit;color:inherit}
@@ -52,11 +53,11 @@ select,input,textarea{font:inherit;color:inherit}
 .tabs button{flex:1;border:0;background:none;padding:8px 0 6px;min-height:52px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
 .tabs svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tabs button.on{color:var(--wine)}
-.fab{position:fixed;right:18px;bottom:calc(70px + max(4px, calc(env(safe-area-inset-bottom) - 10px)));width:56px;height:56px;border-radius:50%;border:0;background:var(--wine);color:#fff;font-size:30px;line-height:1;box-shadow:0 6px 16px rgba(109,21,48,.35);z-index:11}
+.fab{position:absolute;right:18px;bottom:calc(70px + max(4px, calc(env(safe-area-inset-bottom) - 10px)));width:56px;height:56px;border-radius:50%;border:0;background:var(--wine);color:#fff;font-size:30px;line-height:1;box-shadow:0 6px 16px rgba(109,21,48,.35);z-index:11}
 .fab.hide{display:none}
-#backdrop{position:fixed;inset:0;background:rgba(20,8,12,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
+#backdrop{position:absolute;inset:0;background:rgba(20,8,12,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
 #backdrop.on{opacity:1;pointer-events:auto}
-#sheet{position:fixed;left:0;right:0;bottom:0;max-height:92vh;max-height:92dvh;overflow-y:auto;overscroll-behavior:contain;background:var(--bg);border-radius:18px 18px 0 0;transform:translateY(105%);transition:transform .25s ease;z-index:21;padding:8px 16px 16px;-webkit-overflow-scrolling:touch}
+#sheet{position:absolute;left:0;right:0;bottom:0;max-height:92vh;max-height:92dvh;overflow-y:auto;overscroll-behavior:contain;background:var(--bg);border-radius:18px 18px 0 0;transform:translateY(105%);transition:transform .25s ease;z-index:21;padding:8px 16px 16px;-webkit-overflow-scrolling:touch}
 #sheet.noact{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
 .x{position:absolute;top:10px;right:12px;width:34px;height:34px;border-radius:50%;border:0;background:#ebe1da;color:#5a4a4f;font-size:16px;line-height:34px;text-align:center;padding:0;z-index:2}
 .actions{position:sticky;bottom:-16px;margin:14px -16px -16px;padding:6px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to bottom,rgba(247,242,236,0),var(--bg) 14px);z-index:3}
@@ -110,7 +111,7 @@ textarea.in{min-height:70px;resize:vertical}
 .bar .b{flex:1;height:10px;background:#f1e8e3;border-radius:5px;overflow:hidden}
 .bar .b i{display:block;height:100%;border-radius:5px}
 .bar .v{width:34px;text-align:right;font-weight:600}
-#toast{position:fixed;left:50%;bottom:calc(144px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:#2a1a1f;color:#fff;padding:10px 14px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:30;display:flex;gap:14px;align-items:center;max-width:90vw}
+#toast{position:absolute;left:50%;bottom:calc(144px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:#2a1a1f;color:#fff;padding:10px 14px;border-radius:12px;font-size:14px;opacity:0;pointer-events:none;transition:.2s;z-index:30;display:flex;gap:14px;align-items:center;max-width:90vw}
 #toast.on{opacity:1;transform:translateX(-50%);pointer-events:auto}
 #toast button{background:none;border:0;color:#f4a3b4;font-weight:700;font-size:14px;padding:0}
 .status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
@@ -541,7 +542,7 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.5</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.6</p>
   </div>`;
 }
 
@@ -809,6 +810,20 @@ document.addEventListener('change', e => {
     rd.readAsText(t.files[0]);
   }
 });
+
+function fitHeight(){
+  let h = window.innerHeight;
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (standalone) {
+    const full = matchMedia('(orientation: portrait)').matches ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    if (full > h && full - h < 140) h = full;   // iOS annonce un écran trop court : on prend la vraie hauteur
+  }
+  document.documentElement.style.setProperty('--appH', h + 'px');
+}
+fitHeight();
+addEventListener('resize', fitHeight);
+addEventListener('orientationchange', () => setTimeout(fitHeight, 300));
+addEventListener('pageshow', fitHeight);
 
 render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
