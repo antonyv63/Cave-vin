@@ -59,12 +59,13 @@ select,input,textarea{font:inherit;color:inherit}
 #backdrop.on{opacity:1;pointer-events:auto}
 #sheet{position:absolute;left:0;right:0;bottom:0;max-height:92vh;max-height:92dvh;overflow-y:auto;overscroll-behavior:contain;background:var(--bg);border-radius:18px 18px 0 0;transform:translateY(105%);transition:transform .25s ease;z-index:21;padding:8px 16px 16px;-webkit-overflow-scrolling:touch}
 #sheet.noact{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
-.x{position:absolute;top:10px;right:12px;width:34px;height:34px;border-radius:50%;border:0;background:#ebe1da;color:#5a4a4f;font-size:16px;line-height:34px;text-align:center;padding:0;z-index:2}
+.x{position:absolute;top:6px;right:12px;width:34px;height:34px;border-radius:50%;border:0;background:#ebe1da;color:#5a4a4f;font-size:16px;line-height:34px;text-align:center;padding:0;z-index:2}
 .actions{position:sticky;bottom:-16px;margin:14px -16px -16px;padding:6px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to bottom,rgba(247,242,236,0),var(--bg) 14px);z-index:3}
 .actions .btn{margin-top:8px}
 #sheet.on{transform:none}
 @media(min-width:700px){#sheet{max-width:640px;margin:0 auto}}
-.grab{width:40px;height:5px;border-radius:3px;background:#d8cbc4;margin:2px auto 10px}
+.grab{position:sticky;top:-8px;z-index:4;height:34px;margin:-8px -16px 0;background:var(--bg);display:flex;justify-content:center;align-items:flex-start;padding-top:10px;touch-action:none;cursor:grab}
+.grab .bar{width:42px;height:5px;border-radius:3px;background:#cdbdb5}
 h2{font:600 22px/1.25 Georgia,serif;margin:4px 44px 2px 0}
 h3{font-size:12.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:22px 2px 6px;font-weight:600}
 .card{background:#fff;border-radius:var(--r);padding:12px 14px;margin-top:10px}
@@ -571,12 +572,12 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.7</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.8</p>
   </div>`;
 }
 
 /* ---------- Feuilles (modales) ---------- */
-function openSheet(html){ const s = $('#sheet'); s.innerHTML = '<div class="grab"></div><button class="x" data-act="close" aria-label="Fermer">✕</button>' + html; s.classList.toggle('noact', !html.includes('class="actions"')); s.scrollTop = 0; s.classList.add('on'); $('#backdrop').classList.add('on'); document.body.classList.add('lock'); }
+function openSheet(html){ const s = $('#sheet'); s.style.transform = ''; s.innerHTML = '<div class="grab"><span class="bar"></span><button class="x" data-act="close" aria-label="Fermer">✕</button></div>' + html; s.classList.toggle('noact', !html.includes('class="actions"')); s.scrollTop = 0; s.classList.add('on'); $('#backdrop').classList.add('on'); document.body.classList.add('lock'); }
 function closeSheet(){ $('#sheet').classList.remove('on'); $('#backdrop').classList.remove('on'); document.body.classList.remove('lock'); FS = null; CS = null; }
 
 function openDetail(id, k){
@@ -875,6 +876,45 @@ document.addEventListener('change', e => {
     rd.readAsText(t.files[0]);
   }
 });
+
+/* Glisser vers le bas pour fermer une fenêtre (depuis la barre, ou depuis le contenu quand il est tout en haut) */
+(() => {
+  const sh = $('#sheet'), bd = $('#backdrop');
+  let y0 = null, dy = 0, t0 = 0, drag = false;
+  sh.addEventListener('touchstart', e => {
+    y0 = null;
+    if (!sh.classList.contains('on') || e.touches.length > 1) return;
+    const onGrab = !!e.target.closest('.grab') && !e.target.closest('.x');
+    if (!onGrab && (sh.scrollTop > 0 || e.target.closest('input,textarea,select'))) return;
+    y0 = e.touches[0].clientY; dy = 0; t0 = Date.now(); drag = onGrab;
+  }, {passive:true});
+  sh.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    dy = e.touches[0].clientY - y0;
+    if (!drag) {
+      if (dy > 8 && sh.scrollTop <= 0) { drag = true; y0 += 8; dy -= 8; }
+      else { if (dy < -4) y0 = null; return; }
+    }
+    if (dy < 0) dy = 0;
+    e.preventDefault();
+    sh.style.transition = 'none';
+    sh.style.transform = `translateY(${dy}px)`;
+    bd.style.opacity = String(Math.max(.15, 1 - dy / 450));
+  }, {passive:false});
+  const end = () => {
+    if (y0 === null) return;
+    y0 = null;
+    if (!drag) return;
+    drag = false;
+    sh.style.transition = ''; bd.style.opacity = '';
+    const v = dy / Math.max(1, Date.now() - t0);
+    if (dy > 110 || (dy > 35 && v > .45)) {
+      sh.style.transform = 'translateY(105%)'; closeSheet();
+      setTimeout(() => { if (!sh.classList.contains('on')) sh.style.transform = ''; }, 300);
+    } else sh.style.transform = '';
+  };
+  sh.addEventListener('touchend', end); sh.addEventListener('touchcancel', end);
+})();
 
 function fitHeight(){
   let h = window.innerHeight;
