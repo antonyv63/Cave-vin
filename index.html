@@ -19,7 +19,7 @@ html{touch-action:manipulation;-webkit-text-size-adjust:100%}
 body.lock{overflow:hidden}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif}
 html,body{height:100%;overflow:hidden;overscroll-behavior:none}
-body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+body{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column}
 #app{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 button{font:inherit;color:inherit;cursor:pointer}
 select,input,textarea{font:inherit;color:inherit}
@@ -48,11 +48,11 @@ select,input,textarea{font:inherit;color:inherit}
 .qty{min-width:38px;height:38px;border-radius:50%;background:#f3e9e4;display:grid;place-items:center;font-weight:700;color:var(--wine);flex:none}
 .qty.zero{background:#eee;color:#aaa}
 .empty{text-align:center;color:var(--muted);padding:36px 20px}
-.tabs{position:relative;flex:none;display:flex;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:10}
+.tabs{position:relative;flex:none;display:flex;background:rgba(255,255,255,.96);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:max(4px, calc(env(safe-area-inset-bottom) - 10px));z-index:10}
 .tabs button{flex:1;border:0;background:none;padding:8px 0 6px;min-height:52px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
 .tabs svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tabs button.on{color:var(--wine)}
-.fab{position:fixed;right:18px;bottom:calc(76px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;border:0;background:var(--wine);color:#fff;font-size:30px;line-height:1;box-shadow:0 6px 16px rgba(109,21,48,.35);z-index:11}
+.fab{position:fixed;right:18px;bottom:calc(70px + max(4px, calc(env(safe-area-inset-bottom) - 10px)));width:56px;height:56px;border-radius:50%;border:0;background:var(--wine);color:#fff;font-size:30px;line-height:1;box-shadow:0 6px 16px rgba(109,21,48,.35);z-index:11}
 .fab.hide{display:none}
 #backdrop{position:fixed;inset:0;background:rgba(20,8,12,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
 #backdrop.on{opacity:1;pointer-events:auto}
@@ -472,8 +472,8 @@ function drawBox(vins){
 function vPlan(){
   let h = header('Plan de la cave') + '<div class="wrap">';
   if (!S.casiers.length) {
-    h += `<div class="empty"><div style="font-size:42px">🗄️</div><p>Décris ta cave : crée un casier par meuble ou étagère (nombre de rangées × colonnes), ou une zone libre pour un carton, un placard…</p>
-      <button class="btn p" data-act="newcas">Créer mon premier casier</button></div>`;
+    h += `<div class="empty"><div style="font-size:42px">🗄️</div><p>Décris ta cave : ajoute chaque meuble (casier en bois, cave électrique, étagère) avec son nombre d'étages, ou une zone libre pour un carton, un placard…</p>
+      <button class="btn p" data-act="newcas">Ajouter mon premier meuble</button></div>`;
   }
   const info = c => c.rangees ? `${occupancy(c.id).size}/${capacity(c)}` : plural(sum(S.vins.filter(v => v.casierId === c.id).map(v => v.qte)), 'bt', 'bts');
   if (S.casiers.length > 1) {
@@ -541,7 +541,7 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.4</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.5</p>
   </div>`;
 }
 
