@@ -131,6 +131,11 @@ textarea.in{min-height:70px;resize:vertical}
 .ov svg{display:block;height:78px;width:auto;max-width:100% !important;margin:0 auto}
 .ov b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:5px}
 .ov span{color:var(--muted)}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 8px}.grid3 label.f{margin-top:0;font-size:12px;white-space:nowrap}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px;margin-top:12px}.chk input{width:20px;height:20px;accent-color:var(--wine)}
+.etg{padding:10px 12px}.lrow{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:15px}
+.stepper.sm button{width:40px;height:38px}.stepper.sm input{width:44px;font-size:16px}
+.etb{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .boxwrap{display:flex;gap:12px;align-items:center;margin-top:6px}
 .boxwrap svg{width:92px;flex:none}
 .mini{font-size:13px;color:var(--muted)}
@@ -202,10 +207,22 @@ function load(){
   return {version:1,casiers:[],vins:[],historique:[]};
 }
 function migrate(s){
-  s.casiers.forEach(c => { if (!c.style) c.style = c.rangees ? 'bois' : 'libre'; if (!c.sens) c.sens = 'haut'; if (!c.lignes) c.lignes = 1; });
+  s.casiers.forEach(c => {
+    if (!c.style) c.style = c.rangees ? 'bois' : 'libre';
+    if (!c.sens) c.sens = 'haut';
+    if (!Array.isArray(c.etages)) {
+      const L = Math.max(1, c.lignes || 1), E = c.rangees ? Math.round(c.rangees / L) : 0, C = c.colonnes || 0;
+      c.etages = Array.from({length:E}, () => Array.from({length:L}, (_, lb) => lb % 2 ? Math.max(1, C - 1) : C));
+    }
+    c.rangees = c.etages.reduce((a, l) => a + l.length, 0);
+    c.colonnes = c.etages.reduce((a, l) => Math.max(a, ...l), 0);
+    delete c.lignes;
+  });
   s.vins.forEach(v => {
     const c = s.casiers.find(x => x.id === v.casierId);
-    if (c && c.rangees && c.lignes > 1 && v.cases) v.cases = v.cases.filter(k => { const [i, col] = k.split(',').map(Number); return !((i % c.lignes) % 2 === 1 && col === c.colonnes - 1); });
+    if (!c || !c.rangees || !v.cases) return;
+    const rows = []; c.etages.forEach(l => l.forEach(n => rows.push(n)));
+    v.cases = v.cases.filter(k => { const [i, col] = k.split(',').map(Number); return i < rows.length && col < rows[i]; });
   });
   return s;
 }
@@ -222,20 +239,28 @@ const getV = id => S.vins.find(v => v.id === id);
 const getC = id => S.casiers.find(c => c.id === id);
 const colOf = v => (COUL[v.couleur] || COUL.rouge).c;
 const styleOf = c => !c || !c.rangees ? 'libre' : (STYLES[c.style] && c.style !== 'libre' ? c.style : 'bois');
-const nbL = c => Math.max(1, c.lignes || 1);
-const nbE = c => Math.round(c.rangees / nbL(c));
-// En quinconce : les lignes impaires (2e, 4e en partant du bas) sont décalées d'une demi-bouteille et ont une place de moins
-const isStag = (c, i) => (i % nbL(c)) % 2 === 1;
-const validCell = (c, k) => { const [i, col] = k.split(',').map(Number); return i < c.rangees && col < c.colonnes && !(isStag(c, i) && col === c.colonnes - 1); };
-const capacity = c => c.rangees ? nbE(c) * (nbL(c) * c.colonnes - Math.floor(nbL(c) / 2)) : 0;
-const etageNum = (c, i) => { const e = Math.floor(i / nbL(c)); return c.sens === 'bas' ? nbE(c) - e : e + 1; };
+// Disposition : c.etages[e] = nombre de bouteilles de chaque ligne de l'étage e (étage 0 = en haut ; lignes du bas vers le haut).
+// Une place = "i,col" où i = numéro de ligne global (étages dans l'ordre, puis lignes du bas vers le haut).
+function layout(c){
+  if (c._lk === JSON.stringify(c.etages)) return c._lay;
+  const rows = [];
+  (c.etages || []).forEach((lines, e) => lines.forEach((n, lb) => rows.push({e, lb, n, L:lines.length})));
+  Object.defineProperty(c, '_lay', {value:rows, writable:true, configurable:true, enumerable:false});
+  Object.defineProperty(c, '_lk', {value:JSON.stringify(c.etages), writable:true, configurable:true, enumerable:false});
+  return rows;
+}
+const rowIdx = (etages, e, lb) => etages.slice(0, e).reduce((a, l) => a + l.length, 0) + lb;
+const nbE = c => (c.etages || []).length;
+const capacity = c => (c.etages || []).reduce((a, l) => a + sum(l), 0);
+const validCell = (c, k) => { const [i, col] = k.split(',').map(Number), r = layout(c)[i]; return !!r && col < r.n; };
+const etageNum = (c, i) => { const e = layout(c)[i]?.e ?? 0; return c.sens === 'bas' ? nbE(c) - e : e + 1; };
 const LIGNES = {2:['bas','haut'], 3:['bas','milieu','haut']};
-const ligneName = (c, i) => { const L = nbL(c); if (L === 1) return ''; const lb = i % L; return LIGNES[L] ? LIGNES[L][lb] : 'L' + (lb + 1); };
+const lineName = (L, lb) => L === 1 ? '' : (LIGNES[L] ? LIGNES[L][lb] : 'L' + (lb + 1));
+const ligneName = (c, i) => { const r = layout(c)[i]; return r ? lineName(r.L, r.lb) : ''; };
 const cellLabel = (k, c) => { const [r,col] = k.split(',').map(Number); if (!c || !c.rangees) return String.fromCharCode(65+r) + (col+1); const ln = ligneName(c, r); return `Ét.${etageNum(c,r)}${ln ? ' ' + ln : ''} n°${col+1}`; };
 function slotsText(c, cases){
-  const m = new Map();
-  const L = nbL(c);
-  cases.map(k => k.split(',').map(Number)).sort((a,b) => etageNum(c,a[0]) - etageNum(c,b[0]) || (a[0] % L) - (b[0] % L) || a[1] - b[1])
+  const m = new Map(), lay = layout(c);
+  cases.map(k => k.split(',').map(Number)).sort((a,b) => etageNum(c,a[0]) - etageNum(c,b[0]) || (lay[a[0]]?.lb||0) - (lay[b[0]]?.lb||0) || a[1] - b[1])
     .forEach(([r,col]) => { const ln = ligneName(c, r), key = `Ét.${etageNum(c,r)}${ln ? ' ' + ln : ''}`; if (!m.has(key)) m.set(key, []); m.get(key).push(col + 1); });
   return [...m].map(([e,l]) => `${e} n°${l.join(', ')}`).join(' · ');
 }
@@ -383,39 +408,42 @@ const DEFS = `<defs>
 
 /* Dessine un meuble à bouteilles. o.mode='form' (sélection), o.mini (vignette), o.hl/o.hlk (mise en évidence) */
 function drawCasier(c, o = {}){
-  const st = styleOf(c), C = c.colonnes, mini = !!o.mini, L = nbL(c), E = nbE(c);
+  const st = styleOf(c), mini = !!o.mini, ET = c.etages || [];
+  const C = Math.max(1, ...ET.map(l => Math.max(...l)));
+  const uniform = ET.every(l => l.length === 1 && l[0] === C);
   const fr = st === 'etagere' ? 0 : (st === 'frigo' ? 14 : 10);
   const pad = st === 'etagere' ? 4 : 6;
-  const LM = mini ? 4 : 40, TM = mini ? 4 : 16;
+  const LM = mini ? 4 : 40, TM = mini ? 4 : (uniform ? 16 : 6);
   const s = Math.min(46, (360 - 2*LM - 2*fr - 2*pad) / C);
   const plank = st === 'frigo' ? 5 : (st === 'etagere' ? 7 : 6);
-  const lineH = s * .87;                       // quinconce : la ligne du dessus se loge dans les creux
-  const rowH = s + (L - 1) * lineH + plank + 3;   // hauteur d'un étage
+  const lineH = s * .87;                                   // lignes empilées, nichées dans les creux
+  const etH = l => s + (l.length - 1) * lineH + plank + 3;  // hauteur d'un étage
   const headIn = st === 'frigo' ? 12 : 0, footIn = st === 'frigo' ? 26 : 0;
-  const cabW = C*s + 2*pad + 2*fr, cabH = 2*fr + headIn + E*rowH + footIn;
+  const cabW = C*s + 2*pad + 2*fr, cabH = 2*fr + headIn + sum(ET.map(etH)) + footIn;
   const W = cabW + 2*LM, H = TM + cabH + (st === 'etagere' ? 4 : 8);
   const cx = LM, cy = TM, ix = cx + fr, iy = cy + fr, iw = cabW - 2*fr, ih = cabH - 2*fr;
   const dark = st !== 'etagere';
-  const occ = occupancy(c.id, o.mode === 'form' ? o.exceptId : null);
+  const occ = c.id === '__apercu' ? new Map() : occupancy(c.id, o.mode === 'form' ? o.exceptId : null);
   let g = DEFS;
   if (st === 'bois') {
-    g += `<rect x="${cx+6}" y="${cy+cabH-2}" width="12" height="8" fill="#5e3a1c"/><rect x="${cx+cabW-18}" y="${cy+cabH-2}" width="12" height="8" fill="#5e3a1c"/>`;
+    g += `<rect x="${cx+6}" y="${f1(cy+cabH-2)}" width="12" height="8" fill="#5e3a1c"/><rect x="${f1(cx+cabW-18)}" y="${f1(cy+cabH-2)}" width="12" height="8" fill="#5e3a1c"/>`;
     g += `<rect x="${cx}" y="${cy}" width="${f1(cabW)}" height="${f1(cabH)}" rx="5" fill="url(#gWood)"/>`;
     g += `<rect x="${ix}" y="${iy}" width="${f1(iw)}" height="${f1(ih)}" rx="2" fill="url(#gIn)"/>`;
-    if (L === 1) for (let j = 1; j < C; j++) g += `<line x1="${f1(ix+pad+j*s)}" y1="${iy}" x2="${f1(ix+pad+j*s)}" y2="${f1(iy+ih)}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`;
+    if (uniform) for (let j = 1; j < C; j++) g += `<line x1="${f1(ix+pad+j*s)}" y1="${iy}" x2="${f1(ix+pad+j*s)}" y2="${f1(iy+ih)}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`;
   } else if (st === 'frigo') {
-    g += `<rect x="${cx+10}" y="${cy+cabH-2}" width="14" height="8" rx="2" fill="#18191c"/><rect x="${cx+cabW-24}" y="${cy+cabH-2}" width="14" height="8" rx="2" fill="#18191c"/>`;
+    g += `<rect x="${cx+10}" y="${f1(cy+cabH-2)}" width="14" height="8" rx="2" fill="#18191c"/><rect x="${f1(cx+cabW-24)}" y="${f1(cy+cabH-2)}" width="14" height="8" rx="2" fill="#18191c"/>`;
     g += `<rect x="${cx}" y="${cy}" width="${f1(cabW)}" height="${f1(cabH)}" rx="12" fill="#2b2d31"/>`;
     g += `<rect x="${ix}" y="${iy}" width="${f1(iw)}" height="${f1(ih)}" rx="6" fill="url(#gGlass)"/>`;
     g += `<rect x="${f1(ix+iw*.2)}" y="${iy+4}" width="${f1(iw*.6)}" height="3" rx="1.5" fill="#bfe3ff" opacity=".75"/>`;
     const fy = iy + ih - footIn;
-    g += `<rect x="${ix}" y="${f1(fy)}" width="${f1(iw)}" height="${footIn}" rx="0" fill="#1c1e22"/>`;
+    g += `<rect x="${ix}" y="${f1(fy)}" width="${f1(iw)}" height="${footIn}" fill="#1c1e22"/>`;
     for (let x = ix + 8; x < ix + iw*.55; x += 6) g += `<line x1="${f1(x)}" y1="${f1(fy+7)}" x2="${f1(x)}" y2="${f1(fy+footIn-7)}" stroke="#34373d" stroke-width="2"/>`;
     if (!mini) g += `<text x="${f1(ix+iw-10)}" y="${f1(fy+17)}" text-anchor="end" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="#7fe0a0">12°C</text>`;
     g += `<rect x="${f1(cx+cabW-fr/2-2)}" y="${f1(cy+cabH*.3)}" width="4" height="${f1(cabH*.35)}" rx="2" fill="#c9ccd1"/>`;
   }
-  for (let e = 0; e < E; e++) {
-    const ry = iy + headIn + e*rowH, py = ry + s + (L - 1)*lineH + 3, i0 = e * L;
+  let ry = iy + headIn;
+  ET.forEach((lines, e) => {
+    const L = lines.length, py = ry + s + (L - 1)*lineH + 3, i0 = rowIdx(ET, e, 0);
     if (st === 'etagere') {
       g += `<path d="M${cx+14} ${f1(py+plank)} v10 l10 -10z M${f1(cx+cabW-14)} ${f1(py+plank)} v10 l-10 -10z" fill="#7a4c24"/>`;
       g += `<rect x="${cx}" y="${f1(py)}" width="${f1(cabW)}" height="${plank}" rx="1.5" fill="url(#gPlank)"/>`;
@@ -424,32 +452,33 @@ function drawCasier(c, o = {}){
       if (st === 'frigo') g += `<rect x="${ix}" y="${f1(py)}" width="${f1(iw)}" height="1" fill="rgba(255,255,255,.35)"/>`;
     }
     if (!mini) {
-      const my = ry + 2 + (s + (L - 1)*lineH) / 2;
-      g += `<text x="${cx-6}" y="${f1(my + (L > 1 ? 0 : 4))}" text-anchor="end" font-size="11" font-family="-apple-system,Segoe UI,sans-serif" fill="#8b7b80">Ét.${etageNum(c,i0)}</text>`;
+      const my = ry + 2 + (s + (L - 1)*lineH) / 2, num = c.sens === 'bas' ? ET.length - e : e + 1;
+      g += `<text x="${cx-6}" y="${f1(my + (L > 1 ? 0 : 4))}" text-anchor="end" font-size="11" font-family="-apple-system,Segoe UI,sans-serif" fill="#8b7b80">Ét.${num}</text>`;
       if (L > 1) g += `<text x="${cx-6}" y="${f1(my + 12)}" text-anchor="end" font-size="8.5" font-family="-apple-system,Segoe UI,sans-serif" fill="#a8999d">${L} lignes</text>`;
     }
-    for (let lt = 0; lt < L; lt++) {             // de la ligne du haut vers celle du bas
-    const i = i0 + (L - 1 - lt), by = ry + 2 + lt*lineH + s/2, stag = isStag(c, i);
-    for (let j = 0; j < C; j++) {
-      if (stag && j === C - 1) continue;
-      const bx = ix + pad + j*s + s/2 + (stag ? s/2 : 0), r = s*.42, k = i + ',' + j, v = occ.get(k);
-      const hit = `<rect x="${f1(bx-s/2)}" y="${f1(by-s/2)}" width="${f1(s)}" height="${f1(s)}" fill="transparent"/>`;
-      const ring = `<circle class="ring" cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="3"/>`;
-      if (mini) g += v ? bottleSVG(bx, by, r, v.couleur) : emptySVG(bx, by, r, dark);
-      else if (o.mode === 'form') {
-        if (v) g += `<g class="dim">${bottleSVG(bx, by, r, v.couleur)}</g>`;
-        else if (o.sel.has(k)) g += `<g class="e" data-act="fcell" data-k="${k}">${hit}${bottleSVG(bx, by, r, FS.couleur)}<circle cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="2.5"/></g>`;
-        else g += `<g class="e" data-act="fcell" data-k="${k}">${hit}${emptySVG(bx, by, r, dark)}</g>`;
-      } else if (v) {
-        const dim = o.hl && v.id !== o.hl, hl = o.hl && v.id === o.hl && (!o.hlk || o.hlk === k);
-        g += `<g class="b${dim ? ' dim' : ''}" data-act="cellocc" data-id="${v.id}" data-k="${k}">${hit}${bottleSVG(bx, by, r, v.couleur, abbr(v))}${hl ? ring : ''}</g>`;
-      } else {
-        g += `<g class="e${o.hl ? ' dim' : ''}" data-act="cellempty" data-k="${k}" data-c="${c.id}">${hit}${emptySVG(bx, by, r, dark)}</g>`;
+    for (let lt = 0; lt < L; lt++) {                   // de la ligne du haut vers celle du bas
+      const lb = L - 1 - lt, n = lines[lb], i = i0 + lb, by = ry + 2 + lt*lineH + s/2;
+      const off = (C - n) * s / 2;                     // ligne centrée : une bouteille de moins = quinconce
+      for (let j = 0; j < n; j++) {
+        const bx = ix + pad + off + j*s + s/2, r = s*.42, k = i + ',' + j, v = occ.get(k);
+        const hit = `<rect x="${f1(bx-s/2)}" y="${f1(by-s/2)}" width="${f1(s)}" height="${f1(s)}" fill="transparent"/>`;
+        const ring = `<circle class="ring" cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="3"/>`;
+        if (mini) g += v ? bottleSVG(bx, by, r, v.couleur) : emptySVG(bx, by, r, dark);
+        else if (o.mode === 'form') {
+          if (v) g += `<g class="dim">${bottleSVG(bx, by, r, v.couleur)}</g>`;
+          else if (o.sel.has(k)) g += `<g class="e" data-act="fcell" data-k="${k}">${hit}${bottleSVG(bx, by, r, FS.couleur)}<circle cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="2.5"/></g>`;
+          else g += `<g class="e" data-act="fcell" data-k="${k}">${hit}${emptySVG(bx, by, r, dark)}</g>`;
+        } else if (v) {
+          const dim = o.hl && v.id !== o.hl, hl = o.hl && v.id === o.hl && (!o.hlk || o.hlk === k);
+          g += `<g class="b${dim ? ' dim' : ''}" data-act="cellocc" data-id="${v.id}" data-k="${k}">${hit}${bottleSVG(bx, by, r, v.couleur, abbr(v))}${hl ? ring : ''}</g>`;
+        } else {
+          g += `<g class="e${o.hl ? ' dim' : ''}" data-act="cellempty" data-k="${k}" data-c="${c.id}">${hit}${emptySVG(bx, by, r, dark)}</g>`;
+        }
       }
     }
-    }
-  }
-  if (!mini) {
+    ry += etH(lines);
+  });
+  if (!mini && uniform) {
     const step = C > 16 ? 2 : 1;
     for (let j = 0; j < C; j += step) g += `<text x="${f1(ix+pad+j*s+s/2)}" y="${TM-5}" text-anchor="middle" font-size="9" font-family="-apple-system,Segoe UI,sans-serif" fill="#a8999d">${j+1}</text>`;
   }
@@ -530,7 +559,7 @@ function vStats(){
 function vReglages(){
   return header('Réglages') + `<div class="wrap">
     <h3>Casiers et zones</h3>
-    ${S.casiers.map(c => `<div class="item" data-act="editcas" data-id="${c.id}"><span style="font-size:20px">${STYLES[styleOf(c)].i}</span><div class="main"><div class="t">${esc(c.nom)}</div><div class="s">${c.rangees ? `${STYLES[styleOf(c)].l} · ${nbE(c)} étages${nbL(c) > 1 ? ' × ' + nbL(c) + ' lignes' : ''} × ${c.colonnes} (${capacity(c)} places)` : 'Zone libre'}</div></div><span class="mini">›</span></div>`).join('')}
+    ${S.casiers.map(c => `<div class="item" data-act="editcas" data-id="${c.id}"><span style="font-size:20px">${STYLES[styleOf(c)].i}</span><div class="main"><div class="t">${esc(c.nom)}</div><div class="s">${c.rangees ? `${STYLES[styleOf(c)].l} · ${plural(nbE(c), 'étage')} · ${capacity(c)} places` : 'Zone libre'}</div></div><span class="mini">›</span></div>`).join('')}
     <button class="btn" data-act="newcas">＋ Ajouter un meuble ou une zone</button>
     <h3>Sauvegarde</h3>
     <div class="card"><div class="mini">Tes données sont enregistrées uniquement sur cet appareil (rien n'est envoyé sur GitHub). Fais une sauvegarde de temps en temps, dans Fichiers ou iCloud Drive.</div>
@@ -542,7 +571,7 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.6</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.7</p>
   </div>`;
 }
 
@@ -635,49 +664,75 @@ function saveForm(){
   save(); closeSheet(); render(); toast(edit ? 'Modifications enregistrées' : 'Ajouté à la cave ✓');
 }
 
+const genEtages = (E, C, L, q) => Array.from({length:E}, () => Array.from({length:L}, (_, lb) => q && lb % 2 ? Math.max(1, C - 1) : C));
+const clampN = (n, a, b) => Math.min(b, Math.max(a, parseInt(n) || a));
+
 function openCas(id){
-  const c = id ? getC(id) : {nom:'Casier ' + (S.casiers.length + 1), rangees:6, colonnes:8, style:'bois', sens:'haut'};
-  CS = {id, style: id ? styleOf(c) : 'bois', sens: c.sens || 'haut', lignes: c.lignes || 1};
+  const c = id ? getC(id) : {nom:'Casier ' + (S.casiers.length + 1), etages:genEtages(6, 8, 1, true), style:'bois', sens:'haut'};
+  const cfg = c.etages && c.etages.length ? JSON.parse(JSON.stringify(c.etages)) : genEtages(6, 8, 1, true);
+  const C0 = Math.max(...cfg.map(l => l[0])), L0 = cfg[0].length;
+  const q0 = cfg.some(l => l.some((n, lb) => lb % 2 && n < l[0])) || L0 === 1;
+  CS = {id, style: id ? styleOf(c) : 'bois', sens: c.sens || 'haut', cfg};
   const h = `<h2>${id ? 'Modifier' : 'Nouveau meuble'}</h2>
     <label class="f">Nom</label><input id="c_nom" class="in" value="${esc(c.nom)}" placeholder="ex. Casier cave gauche, Cave électrique cuisine…">
     <label class="f">Type de meuble</label><div class="seg" id="c_style">${Object.entries(STYLES).map(([k,s]) => `<button type="button" data-act="cstyle" data-v="${k}" class="${CS.style===k?'on':''}">${s.i} ${s.l}</button>`).join('')}</div>
-    <div id="c_dims" style="${CS.style!=='libre'?'':'display:none'}"><div class="grid2">
-      <div><label class="f">Nombre d'étages</label><input id="c_r" class="in" inputmode="numeric" value="${c.rangees ? nbE(c) : 6}"></div>
-      <div><label class="f">Bouteilles par étage</label><input id="c_c" class="in" inputmode="numeric" value="${c.colonnes || 8}"></div>
+    <div id="c_dims" style="${CS.style!=='libre'?'':'display:none'}">
+      <h3>Remplissage rapide</h3>
+      <div class="card">
+        <div class="grid3">
+          <div><label class="f">Étages</label><input id="c_r" class="in" inputmode="numeric" value="${cfg.length}"></div>
+          <div><label class="f">Bouteilles / ligne</label><input id="c_c" class="in" inputmode="numeric" value="${C0}"></div>
+          <div><label class="f">Lignes / étage</label><input id="c_l" class="in" inputmode="numeric" value="${L0}"></div>
+        </div>
+        <label class="chk"><input type="checkbox" id="c_q"${q0 ? ' checked' : ''}> Lignes du dessus en quinconce (1 bouteille de moins)</label>
+        <button class="btn" data-act="cgen">Appliquer à tous les étages</button>
+      </div>
+      <h3>Détail étage par étage</h3>
+      <div class="mini" style="margin:0 2px 4px">Règle le nombre de lignes et de bouteilles de chaque étage.</div>
+      <div id="c_cfg"></div>
+      <button class="btn" data-act="cadde">＋ Ajouter un étage</button>
+      <label class="f">Numérotation des étages</label><div class="seg" id="c_sens"><button type="button" data-act="csens" data-v="haut" class="${CS.sens==='haut'?'on':''}">Étage 1 en haut</button><button type="button" data-act="csens" data-v="bas" class="${CS.sens==='bas'?'on':''}">Étage 1 en bas</button></div>
+      <div id="c_prev"></div>
     </div>
-    <label class="f">Lignes de bouteilles par étage</label><div class="seg" id="c_lig">${[1,2,3,4].map(n => `<button type="button" data-act="clig" data-v="${n}" class="${CS.lignes===n?'on':''}">${n === 1 ? '1 ligne' : n + ' lignes'}</button>`).join('')}</div>
-    <div class="note" style="margin-top:4px">Ex. 2 lignes = des bouteilles posées sur l'étagère + une rangée empilée par-dessus, en quinconce (une bouteille de moins).</div>
-    <label class="f">Numérotation des étages</label><div class="seg" id="c_sens"><button type="button" data-act="csens" data-v="haut" class="${CS.sens==='haut'?'on':''}">Étage 1 en haut</button><button type="button" data-act="csens" data-v="bas" class="${CS.sens==='bas'?'on':''}">Étage 1 en bas</button></div>
-    <div class="note">Max 26 étages × 30 bouteilles. Les places sont numérotées de gauche à droite.</div>
-    <div id="c_prev"></div></div>
     ${id ? `<button class="btn d" data-act="cdel" data-id="${id}">Supprimer ce meuble</button>` : ''}
     <div class="actions"><div class="btns"><button class="btn" data-act="close">Annuler</button><button class="btn p" data-act="csave">Enregistrer</button></div></div>`;
   openSheet(h);
-  casPreview();
+  renderCfg(); casPreview();
+}
+function renderCfg(){
+  const el = $('#c_cfg'); if (!el || !CS) return;
+  const E = CS.cfg.length;
+  el.innerHTML = CS.cfg.map((lines, e) => {
+    const num = CS.sens === 'bas' ? E - e : e + 1, L = lines.length;
+    const rows = lines.map((n, lb) => ({n, lb})).reverse().map(({n, lb}) => `
+      <div class="lrow"><span>${L === 1 ? 'Bouteilles' : (LIGNES[L] ? 'Ligne du ' + LIGNES[L][lb] : 'Ligne ' + (lb + 1) + (lb ? '' : ' (bas)'))}</span>
+        <div class="stepper sm"><button type="button" data-act="cdec" data-e="${e}" data-l="${lb}">−</button><input data-cfg="1" data-e="${e}" data-l="${lb}" inputmode="numeric" value="${n}"><button type="button" data-act="cinc" data-e="${e}" data-l="${lb}">+</button></div></div>`).join('');
+    return `<div class="card etg"><div class="ph"><b>Étage ${num}</b><span class="mini">${sum(lines)} places</span></div>
+      ${rows}
+      <div class="etb"><button type="button" class="ic" data-act="caddl" data-e="${e}">＋ ligne</button>${L > 1 ? `<button type="button" class="ic" data-act="cdell" data-e="${e}">− ligne</button>` : ''}<button type="button" class="ic" data-act="cdupe" data-e="${e}">Dupliquer</button>${E > 1 ? `<button type="button" class="ic" data-act="cdele" data-e="${e}" style="color:var(--bad)">Supprimer</button>` : ''}</div></div>`;
+  }).join('');
 }
 function casPreview(){
   const el = $('#c_prev'); if (!el || !CS) return;
-  const r = Math.min(26, Math.max(1, parseInt($('#c_r').value) || 1)), co = Math.min(30, Math.max(1, parseInt($('#c_c').value) || 1));
-  el.innerHTML = CS.style === 'libre' ? '' : `<label class="f">Aperçu · ${r * (CS.lignes * co - Math.floor(CS.lignes / 2))} places</label><div class="card" style="pointer-events:none">${drawCasier({id:'__apercu', rangees:r * CS.lignes, colonnes:co, lignes:CS.lignes, style:CS.style, sens:CS.sens}, {mini:0})}</div>`;
+  if (CS.style === 'libre') { el.innerHTML = ''; return; }
+  const fake = {id:'__apercu', etages:CS.cfg, rangees:CS.cfg.reduce((a, l) => a + l.length, 0), style:CS.style, sens:CS.sens};
+  el.innerHTML = `<label class="f">Aperçu · ${capacity(fake)} places</label><div class="card" style="pointer-events:none">${drawCasier(fake)}</div>`;
 }
+function cfgChanged(){ renderCfg(); casPreview(); }
 function saveCas(){
   const nom = $('#c_nom').value.trim(); if (!nom) { toast('Donne un nom au meuble'); return; }
-  const style = CS.style, sens = CS.sens, L = style === 'libre' ? 1 : CS.lignes;
-  let E = 0, co = 0;
-  if (style !== 'libre') {
-    E = Math.min(26, Math.max(1, parseInt($('#c_r').value) || 0));
-    co = Math.min(30, Math.max(1, parseInt($('#c_c').value) || 0));
-  }
-  const data = {nom, rangees:E * L, colonnes:co, lignes:L, style, sens};
+  const style = CS.style, sens = CS.sens;
+  const etages = style === 'libre' ? [] : CS.cfg.map(l => l.map(n => clampN(n, 1, 30)));
+  const data = {nom, style, sens, etages, rangees:etages.reduce((a, l) => a + l.length, 0), colonnes:etages.reduce((a, l) => Math.max(a, ...l), 0)};
   if (CS.id) {
-    const old = getC(CS.id), oL = nbL(old);
+    const old = getC(CS.id), lay = layout(old);
     const inside = S.vins.filter(v => v.casierId === CS.id);
     let lost = 0; const next = {};
     inside.forEach(v => {
       next[v.id] = (v.cases || []).map(k => {
-        const [i, col] = k.split(',').map(Number), e = Math.floor(i / oL), lb = i % oL;
-        if (e >= E || lb >= L || col >= co || (L > 1 && lb % 2 === 1 && col >= co - 1)) { lost++; return null; }
-        return (e * L + lb) + ',' + col;
+        const [i, col] = k.split(',').map(Number), r = lay[i];
+        if (!r || !etages[r.e] || r.lb >= etages[r.e].length || col >= etages[r.e][r.lb]) { lost++; return null; }
+        return rowIdx(etages, r.e, r.lb) + ',' + col;
       }).filter(Boolean);
     });
     if (lost && !confirm(`${plural(lost,'bouteille')} ne rentre${lost>1?'nt':''} plus dans le nouveau format et ${lost>1?'seront marquées':'sera marquée'} « sans emplacement ». Continuer ?`)) return;
@@ -763,8 +818,17 @@ document.addEventListener('click', e => {
     case 'newcas': openCas(null); break;
     case 'editcas': openCas(id); break;
     case 'cstyle': CS.style = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); $('#c_dims').style.display = CS.style !== 'libre' ? '' : 'none'; casPreview(); break;
-    case 'clig': CS.lignes = +b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); casPreview(); break;
-    case 'csens': CS.sens = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); casPreview(); break;
+    case 'cgen': {
+      const E = clampN($('#c_r').value, 1, 26), C = clampN($('#c_c').value, 1, 30), L = clampN($('#c_l').value, 1, 4);
+      CS.cfg = genEtages(E, C, L, $('#c_q').checked); cfgChanged(); toast('Appliqué à tous les étages'); break;
+    }
+    case 'cinc': case 'cdec': { const e = +b.dataset.e, l = +b.dataset.l; CS.cfg[e][l] = clampN(CS.cfg[e][l] + (a === 'cinc' ? 1 : -1), 1, 30); cfgChanged(); break; }
+    case 'caddl': { const e = +b.dataset.e, l = CS.cfg[e]; if (l.length >= 4) { toast('4 lignes maximum par étage'); break; } const top = l[l.length - 1]; l.push(l.length % 2 && $('#c_q').checked ? Math.max(1, top - 1) : (l.length % 2 ? top : l[0])); cfgChanged(); break; }
+    case 'cdell': { const l = CS.cfg[+b.dataset.e]; if (l.length > 1) l.pop(); cfgChanged(); break; }
+    case 'cdupe': { const e = +b.dataset.e; if (CS.cfg.length >= 26) break; CS.cfg.splice(e + 1, 0, CS.cfg[e].slice()); cfgChanged(); break; }
+    case 'cdele': { if (CS.cfg.length > 1) CS.cfg.splice(+b.dataset.e, 1); cfgChanged(); break; }
+    case 'cadde': { if (CS.cfg.length >= 26) break; CS.cfg.push(CS.cfg[CS.cfg.length - 1].slice()); cfgChanged(); setTimeout(() => { const c = document.querySelectorAll('#c_cfg .etg'); c[c.length - 1]?.scrollIntoView({block:'center', behavior:'smooth'}); }, 50); break; }
+    case 'csens': CS.sens = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); cfgChanged(); break;
     case 'csave': saveCas(); break;
     case 'cdel': {
       const c = getC(id), n = sum(S.vins.filter(v => v.casierId === id).map(v => v.qte));
@@ -784,11 +848,12 @@ document.addEventListener('click', e => {
 
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { F.q = e.target.value; renderList(); }
-  else if (e.target.id === 'c_r' || e.target.id === 'c_c') casPreview();
+  else if (e.target.dataset && e.target.dataset.cfg && CS) { const t = e.target; if (t.value !== '') { CS.cfg[+t.dataset.e][+t.dataset.l] = clampN(t.value, 1, 30); casPreview(); } }
   else if (e.target.id === 'f_app') autoRegion();
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.dataset && t.dataset.cfg && CS) { cfgChanged(); return; }
   if (t.id === 'fr') { F.region = t.value; renderList(); }
   else if (t.id === 'ft') { F.tri = t.value; renderList(); }
   else if (t.id === 'fep') { F.epuises = t.checked; renderList(); }
