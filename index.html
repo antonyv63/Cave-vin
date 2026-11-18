@@ -110,6 +110,19 @@ textarea.in{min-height:70px;resize:vertical}
 .hist:last-child{border:0}
 .hist small{color:var(--muted);margin-left:auto;flex:none}
 .note{font-size:13px;color:var(--muted);margin-top:6px}
+.cab{display:block;width:100%;height:auto;margin:10px auto 0}
+.cab .b,.cab .e{cursor:pointer}
+.cab .dim{opacity:.28}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.15}}
+.cab .ring{animation:pulse 1.1s ease-in-out infinite}
+.overview{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:none}
+.overview::-webkit-scrollbar{display:none}
+.ov{flex:none;width:112px;background:#fff;border-radius:12px;padding:8px 6px;text-align:center;font-size:12px;border:0;box-shadow:0 1px 2px rgba(60,20,30,.06)}
+.ov svg{display:block;height:78px;width:auto;max-width:100% !important;margin:0 auto}
+.ov b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:5px}
+.ov span{color:var(--muted)}
+.boxwrap{display:flex;gap:12px;align-items:center;margin-top:6px}
+.boxwrap svg{width:92px;flex:none}
 .mini{font-size:13px;color:var(--muted)}
 </style>
 </head>
@@ -155,6 +168,12 @@ const REG = {
   'Étranger':['Italie','Espagne','Portugal','Allemagne','Suisse','Autriche','Grèce','Hongrie','Liban','États-Unis','Argentine','Chili','Afrique du Sud','Australie','Nouvelle-Zélande'],
   'Autre':[]
 };
+const STYLES = {
+  bois:{l:'Casier en bois',i:'🪵'},
+  frigo:{l:'Cave électrique',i:'🧊'},
+  etagere:{l:'Étagère murale',i:'📚'},
+  libre:{l:'Zone libre (carton, placard…)',i:'📦'}
+};
 const APP2REG = {};
 for (const [r,l] of Object.entries(REG)) l.forEach(a => APP2REG[norm(a)] = r);
 const YEAR = new Date().getFullYear();
@@ -169,8 +188,12 @@ let CS = null;   // état du formulaire casier
 let undoSnap = null;
 
 function load(){
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.vins)) return Object.assign({version:1,casiers:[],vins:[],historique:[]}, s); } catch(e){}
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.vins)) return migrate(Object.assign({version:1,casiers:[],vins:[],historique:[]}, s)); } catch(e){}
   return {version:1,casiers:[],vins:[],historique:[]};
+}
+function migrate(s){
+  s.casiers.forEach(c => { if (!c.style) c.style = c.rangees ? 'bois' : 'libre'; if (!c.sens) c.sens = 'haut'; });
+  return s;
 }
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){ toast('Erreur de sauvegarde'); } }
 function snap(){ undoSnap = JSON.stringify(S); }
@@ -184,7 +207,15 @@ const sum = a => a.reduce((x,y) => x + (+y||0), 0);
 const getV = id => S.vins.find(v => v.id === id);
 const getC = id => S.casiers.find(c => c.id === id);
 const colOf = v => (COUL[v.couleur] || COUL.rouge).c;
-const cellLabel = k => { const [r,c] = k.split(',').map(Number); return String.fromCharCode(65+r) + (c+1); };
+const styleOf = c => !c || !c.rangees ? 'libre' : (STYLES[c.style] && c.style !== 'libre' ? c.style : 'bois');
+const etageNum = (c, i) => c.sens === 'bas' ? c.rangees - i : i + 1;
+const cellLabel = (k, c) => { const [r,col] = k.split(',').map(Number); return c && c.rangees ? `Ét.${etageNum(c,r)} n°${col+1}` : String.fromCharCode(65+r) + (col+1); };
+function slotsText(c, cases){
+  const m = new Map();
+  cases.map(k => k.split(',').map(Number)).sort((a,b) => etageNum(c,a[0]) - etageNum(c,b[0]) || a[1] - b[1])
+    .forEach(([r,col]) => { const e = etageNum(c,r); if (!m.has(e)) m.set(e, []); m.get(e).push(col + 1); });
+  return [...m].map(([e,l]) => `Ét.${e} n°${l.join(', ')}`).join(' · ');
+}
 const plural = (n, s, p) => n + ' ' + (n > 1 ? (p || s + 's') : s);
 const euro = n => (+n).toLocaleString('fr-FR', {style:'currency', currency:'EUR', maximumFractionDigits: (+n % 1 ? 2 : 0)});
 const cmp = (a,b) => String(a||'').localeCompare(String(b||''), 'fr', {sensitivity:'base'});
@@ -199,7 +230,7 @@ function locText(v){
   const c = getC(v.casierId);
   const parts = [];
   if (c) parts.push(c.nom);
-  if (v.cases && v.cases.length) parts.push(v.cases.map(cellLabel).join(', '));
+  if (c && v.cases && v.cases.length) parts.push(slotsText(c, v.cases));
   if (v.emplacement) parts.push(v.emplacement);
   let s = parts.join(' · ');
   if (c && c.rangees && v.qte > (v.cases||[]).length && v.cases && v.cases.length) s += ` (+${v.qte - v.cases.length} non placée${v.qte - v.cases.length > 1 ? 's' : ''})`;
@@ -305,27 +336,106 @@ function renderList(){
   el.innerHTML = h;
 }
 
-function gridHTML(c, o = {}){
-  const occ = occupancy(c.id, o.exceptId);
-  let h = `<div class="cgrid" style="grid-template-columns:16px repeat(${c.colonnes},minmax(0,1fr))"><span></span>`;
-  for (let j = 0; j < c.colonnes; j++) h += `<span class="lab">${j+1}</span>`;
-  for (let i = 0; i < c.rangees; i++) {
-    h += `<span class="lab">${String.fromCharCode(65+i)}</span>`;
-    for (let j = 0; j < c.colonnes; j++) {
-      const k = i + ',' + j, v = occ.get(k);
-      if (o.mode === 'form') {
-        if (v) h += `<button class="cell occ dis" style="background:${colOf(v)}" disabled aria-label="${cellLabel(k)} occupé"></button>`;
-        else { const s = o.sel.has(k); h += `<button class="cell${s?' sel':''}" data-act="fcell" data-k="${k}" style="${s?'background:'+COUL[FS.couleur].c:''}" aria-label="${cellLabel(k)}"></button>`; }
+/* ---------- Dessins ---------- */
+const f1 = n => Math.round(n * 10) / 10;
+function bottleSVG(x, y, r, couleur, txt){
+  const cc = COUL[couleur] || COUL.rouge;
+  const hx = f1(x - r*.38), hy = f1(y - r*.42);
+  return `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="${cc.c}"/>`
+    + `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r*.8)}" fill="none" stroke="rgba(0,0,0,.26)" stroke-width="${f1(r*.14)}"/>`
+    + `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r*.36)}" fill="rgba(0,0,0,.18)"/>`
+    + `<ellipse cx="${hx}" cy="${hy}" rx="${f1(r*.34)}" ry="${f1(r*.17)}" fill="rgba(255,255,255,.45)" transform="rotate(-35 ${hx} ${hy})"/>`
+    + (txt && r > 7 ? `<text x="${f1(x)}" y="${f1(y + r*.22)}" text-anchor="middle" font-size="${f1(r*.62)}" font-weight="700" font-family="-apple-system,Segoe UI,sans-serif" fill="${cc.light ? 'rgba(50,25,5,.85)' : 'rgba(255,255,255,.95)'}">${esc(txt)}</text>` : '');
+}
+function emptySVG(x, y, r, dark){
+  return `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="${dark ? 'rgba(255,255,255,.05)' : '#f6efe8'}" stroke="${dark ? 'rgba(255,255,255,.24)' : '#d6c7c0'}" stroke-width="1.2" stroke-dasharray="3 3"/>`;
+}
+const DEFS = `<defs>
+  <linearGradient id="gWood" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b07a45"/><stop offset=".5" stop-color="#94612f"/><stop offset="1" stop-color="#7a4c24"/></linearGradient>
+  <linearGradient id="gPlank" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d6a46c"/><stop offset="1" stop-color="#94643a"/></linearGradient>
+  <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2e1c10"/><stop offset="1" stop-color="#1b100a"/></linearGradient>
+  <linearGradient id="gGlass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#25323f"/><stop offset=".25" stop-color="#131921"/><stop offset="1" stop-color="#0a0d11"/></linearGradient>
+  <linearGradient id="gBox" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d09a5e"/><stop offset="1" stop-color="#b27c42"/></linearGradient>
+</defs>`;
+
+/* Dessine un meuble à bouteilles. o.mode='form' (sélection), o.mini (vignette), o.hl/o.hlk (mise en évidence) */
+function drawCasier(c, o = {}){
+  const st = styleOf(c), R = c.rangees, C = c.colonnes, mini = !!o.mini;
+  const fr = st === 'etagere' ? 0 : (st === 'frigo' ? 14 : 10);
+  const pad = st === 'etagere' ? 4 : 6;
+  const LM = mini ? 4 : 40, TM = mini ? 4 : 16;
+  const s = Math.min(46, (360 - 2*LM - 2*fr - 2*pad) / C);
+  const plank = st === 'frigo' ? 5 : (st === 'etagere' ? 7 : 6);
+  const rowH = s + plank + 3;
+  const headIn = st === 'frigo' ? 12 : 0, footIn = st === 'frigo' ? 26 : 0;
+  const cabW = C*s + 2*pad + 2*fr, cabH = 2*fr + headIn + R*rowH + footIn;
+  const W = cabW + 2*LM, H = TM + cabH + (st === 'etagere' ? 4 : 8);
+  const cx = LM, cy = TM, ix = cx + fr, iy = cy + fr, iw = cabW - 2*fr, ih = cabH - 2*fr;
+  const dark = st !== 'etagere';
+  const occ = occupancy(c.id, o.mode === 'form' ? o.exceptId : null);
+  let g = DEFS;
+  if (st === 'bois') {
+    g += `<rect x="${cx+6}" y="${cy+cabH-2}" width="12" height="8" fill="#5e3a1c"/><rect x="${cx+cabW-18}" y="${cy+cabH-2}" width="12" height="8" fill="#5e3a1c"/>`;
+    g += `<rect x="${cx}" y="${cy}" width="${f1(cabW)}" height="${f1(cabH)}" rx="5" fill="url(#gWood)"/>`;
+    g += `<rect x="${ix}" y="${iy}" width="${f1(iw)}" height="${f1(ih)}" rx="2" fill="url(#gIn)"/>`;
+    for (let j = 1; j < C; j++) g += `<line x1="${f1(ix+pad+j*s)}" y1="${iy}" x2="${f1(ix+pad+j*s)}" y2="${f1(iy+ih)}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`;
+  } else if (st === 'frigo') {
+    g += `<rect x="${cx+10}" y="${cy+cabH-2}" width="14" height="8" rx="2" fill="#18191c"/><rect x="${cx+cabW-24}" y="${cy+cabH-2}" width="14" height="8" rx="2" fill="#18191c"/>`;
+    g += `<rect x="${cx}" y="${cy}" width="${f1(cabW)}" height="${f1(cabH)}" rx="12" fill="#2b2d31"/>`;
+    g += `<rect x="${ix}" y="${iy}" width="${f1(iw)}" height="${f1(ih)}" rx="6" fill="url(#gGlass)"/>`;
+    g += `<rect x="${f1(ix+iw*.2)}" y="${iy+4}" width="${f1(iw*.6)}" height="3" rx="1.5" fill="#bfe3ff" opacity=".75"/>`;
+    const fy = iy + ih - footIn;
+    g += `<rect x="${ix}" y="${f1(fy)}" width="${f1(iw)}" height="${footIn}" rx="0" fill="#1c1e22"/>`;
+    for (let x = ix + 8; x < ix + iw*.55; x += 6) g += `<line x1="${f1(x)}" y1="${f1(fy+7)}" x2="${f1(x)}" y2="${f1(fy+footIn-7)}" stroke="#34373d" stroke-width="2"/>`;
+    if (!mini) g += `<text x="${f1(ix+iw-10)}" y="${f1(fy+17)}" text-anchor="end" font-size="10" font-family="ui-monospace,Menlo,monospace" fill="#7fe0a0">12°C</text>`;
+    g += `<rect x="${f1(cx+cabW-fr/2-2)}" y="${f1(cy+cabH*.3)}" width="4" height="${f1(cabH*.35)}" rx="2" fill="#c9ccd1"/>`;
+  }
+  for (let i = 0; i < R; i++) {
+    const ry = iy + headIn + i*rowH, by = ry + 2 + s/2, py = ry + s + 3;
+    if (st === 'etagere') {
+      g += `<path d="M${cx+14} ${f1(py+plank)} v10 l10 -10z M${f1(cx+cabW-14)} ${f1(py+plank)} v10 l-10 -10z" fill="#7a4c24"/>`;
+      g += `<rect x="${cx}" y="${f1(py)}" width="${f1(cabW)}" height="${plank}" rx="1.5" fill="url(#gPlank)"/>`;
+    } else {
+      g += `<rect x="${ix}" y="${f1(py)}" width="${f1(iw)}" height="${plank}" fill="url(#gPlank)"/>`;
+      if (st === 'frigo') g += `<rect x="${ix}" y="${f1(py)}" width="${f1(iw)}" height="1" fill="rgba(255,255,255,.35)"/>`;
+    }
+    if (!mini) g += `<text x="${cx-6}" y="${f1(by+4)}" text-anchor="end" font-size="11" font-family="-apple-system,Segoe UI,sans-serif" fill="#8b7b80">Ét.${etageNum(c,i)}</text>`;
+    for (let j = 0; j < C; j++) {
+      const bx = ix + pad + j*s + s/2, r = s*.42, k = i + ',' + j, v = occ.get(k);
+      const hit = `<rect x="${f1(bx-s/2)}" y="${f1(by-s/2)}" width="${f1(s)}" height="${f1(s)}" fill="transparent"/>`;
+      const ring = `<circle class="ring" cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="3"/>`;
+      if (mini) g += v ? bottleSVG(bx, by, r, v.couleur) : emptySVG(bx, by, r, dark);
+      else if (o.mode === 'form') {
+        if (v) g += `<g class="dim">${bottleSVG(bx, by, r, v.couleur)}</g>`;
+        else if (o.sel.has(k)) g += `<g class="e" data-act="fcell" data-k="${k}">${hit}${bottleSVG(bx, by, r, FS.couleur)}<circle cx="${f1(bx)}" cy="${f1(by)}" r="${f1(r+3)}" fill="none" stroke="${dark ? '#fff' : '#2a1a1f'}" stroke-width="2.5"/></g>`;
+        else g += `<g class="e" data-act="fcell" data-k="${k}">${hit}${emptySVG(bx, by, r, dark)}</g>`;
       } else if (v) {
-        const cc = COUL[v.couleur] || COUL.rouge;
-        const cls = o.hl ? (v.id === o.hl ? (k === o.hlk ? ' hl' : '') : ' dim') : '';
-        h += `<button class="cell occ${cc.light?' light':''}${cls}" style="background:${cc.c}" data-act="cellocc" data-id="${v.id}" data-k="${k}" aria-label="${cellLabel(k)} ${esc(v.domaine)}">${esc(abbr(v))}</button>`;
+        const dim = o.hl && v.id !== o.hl, hl = o.hl && v.id === o.hl && (!o.hlk || o.hlk === k);
+        g += `<g class="b${dim ? ' dim' : ''}" data-act="cellocc" data-id="${v.id}" data-k="${k}">${hit}${bottleSVG(bx, by, r, v.couleur, abbr(v))}${hl ? ring : ''}</g>`;
       } else {
-        h += `<button class="cell${o.hl?' dim':''}" data-act="cellempty" data-k="${k}" data-c="${c.id}" aria-label="${cellLabel(k)} vide"></button>`;
+        g += `<g class="e${o.hl ? ' dim' : ''}" data-act="cellempty" data-k="${k}" data-c="${c.id}">${hit}${emptySVG(bx, by, r, dark)}</g>`;
       }
     }
   }
-  return h + '</div>';
+  if (!mini) {
+    const step = C > 16 ? 2 : 1;
+    for (let j = 0; j < C; j += step) g += `<text x="${f1(ix+pad+j*s+s/2)}" y="${TM-5}" text-anchor="middle" font-size="9" font-family="-apple-system,Segoe UI,sans-serif" fill="#a8999d">${j+1}</text>`;
+  }
+  return `<svg class="cab" viewBox="0 0 ${f1(W)} ${f1(H)}" style="max-width:${Math.round(W*1.3)}px" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
+}
+
+/* Carton ouvert pour les zones libres, avec un goulot par bouteille (max 7) */
+function drawBox(vins){
+  const necks = [];
+  vins.forEach(v => { for (let i = 0; i < v.qte && necks.length < 7; i++) necks.push(colOf(v)); });
+  let g = DEFS + `<path d="M14 40 L4 26 L30 24 L34 38z" fill="#a8743c"/><path d="M86 40 L96 26 L70 24 L66 38z" fill="#a8743c"/>`;
+  g += `<rect x="14" y="34" width="72" height="8" fill="#5a3a1e"/>`;
+  necks.forEach((col, i) => { const x = 22 + i * 9.5; g += `<rect x="${f1(x)}" y="8" width="6" height="34" rx="2" fill="#24331f"/><rect x="${f1(x-.5)}" y="6" width="7" height="8" rx="1.5" fill="${col}"/>`; });
+  g += `<rect x="14" y="40" width="72" height="44" rx="2" fill="url(#gBox)"/><rect x="44" y="40" width="12" height="44" fill="rgba(255,255,255,.18)"/>`;
+  g += `<rect x="14" y="40" width="72" height="4" fill="rgba(0,0,0,.12)"/>`;
+  const n = sum(vins.map(v => v.qte));
+  g += `<text x="50" y="70" text-anchor="middle" font-size="13" font-weight="700" font-family="-apple-system,Segoe UI,sans-serif" fill="#5a3a1e">${n}</text>`;
+  return `<svg viewBox="0 0 100 90" xmlns="http://www.w3.org/2000/svg">${g}</svg>`;
 }
 
 function vPlan(){
@@ -334,22 +444,27 @@ function vPlan(){
     h += `<div class="empty"><div style="font-size:42px">🗄️</div><p>Décris ta cave : crée un casier par meuble ou étagère (nombre de rangées × colonnes), ou une zone libre pour un carton, un placard…</p>
       <button class="btn p" data-act="newcas">Créer mon premier casier</button></div>`;
   }
+  const info = c => c.rangees ? `${occupancy(c.id).size}/${c.rangees * c.colonnes}` : plural(sum(S.vins.filter(v => v.casierId === c.id).map(v => v.qte)), 'bt', 'bts');
+  if (S.casiers.length > 1) {
+    h += `<div class="overview">${S.casiers.map(c => `<button class="ov" data-act="goto" data-id="${c.id}">${c.rangees ? drawCasier(c, {mini:1}) : drawBox(S.vins.filter(v => v.casierId === c.id && v.qte > 0))}<b>${esc(c.nom)}</b><span>${info(c)}</span></button>`).join('')}</div>`;
+  }
   S.casiers.forEach(c => {
     const inC = S.vins.filter(v => v.casierId === c.id && v.qte > 0);
     if (c.rangees) {
       const occ = occupancy(c.id).size, cap = c.rangees * c.colonnes;
-      h += `<div class="card"><div class="ph"><div><b>${esc(c.nom)}</b><br><small>${occ}/${cap} emplacements occupés</small></div><button class="ic" data-act="editcas" data-id="${c.id}">Modifier</button></div>${gridHTML(c)}</div>`;
+      h += `<div class="card" id="cas-${c.id}"><div class="ph"><div><b>${esc(c.nom)}</b><br><small>${STYLES[styleOf(c)].l} · ${occ}/${cap} places occupées</small></div><button class="ic" data-act="editcas" data-id="${c.id}">Modifier</button></div>${drawCasier(c)}</div>`;
     } else {
-      h += `<div class="card"><div class="ph"><div><b>${esc(c.nom)}</b><br><small>Zone libre · ${plural(sum(inC.map(v=>v.qte)),'bouteille')}</small></div><button class="ic" data-act="editcas" data-id="${c.id}">Modifier</button></div>
-        ${inC.length ? inC.sort((a,b)=>cmp(a.domaine,b.domaine)).map(itemHTML).join('') : '<div class="mini" style="margin-top:8px">Vide</div>'}</div>`;
+      h += `<div class="card" id="cas-${c.id}"><div class="ph"><div><b>${esc(c.nom)}</b><br><small>Zone libre · ${plural(sum(inC.map(v=>v.qte)),'bouteille')}</small></div><button class="ic" data-act="editcas" data-id="${c.id}">Modifier</button></div>
+        <div class="boxwrap">${drawBox(inC)}<div class="mini">${inC.length ? 'Touche un vin ci-dessous pour le voir ou le boire.' : 'Vide pour l\'instant. Choisis cette zone comme « Rangement » quand tu ajoutes un vin.'}</div></div>
+        ${inC.sort((a,b)=>cmp(a.domaine,b.domaine)).map(itemHTML).join('')}</div>`;
     }
   });
-  if (S.casiers.length) h += `<button class="btn" data-act="newcas">＋ Ajouter un casier ou une zone</button>`;
+  if (S.casiers.length) h += `<button class="btn" data-act="newcas">＋ Ajouter un meuble ou une zone</button>`;
   const nonRangees = S.vins.filter(v => v.qte > 0 && (!getC(v.casierId) || (getC(v.casierId).rangees && (v.cases||[]).length < v.qte)));
   if (nonRangees.length) {
     h += `<h3>Bouteilles sans emplacement précis</h3><div class="mini">Touche une case vide d'un casier pour y placer une de ces bouteilles.</div>` + nonRangees.map(itemHTML).join('');
   }
-  if (S.casiers.some(c => c.rangees)) h += `<p class="note">Sur la grille : la couleur = couleur du vin, le chiffre = millésime ('19 = 2019). Touche une bouteille pour la voir ou la boire.</p>`;
+  if (S.casiers.some(c => c.rangees)) h += `<p class="note">Bouteilles vues de face : la couleur = couleur du vin, le chiffre = millésime ('19 = 2019). Touche une bouteille pour la voir ou la boire, une place vide pour y ranger un vin.</p>`;
   return h + '</div>';
 }
 
@@ -383,8 +498,8 @@ function vStats(){
 function vReglages(){
   return header('Réglages') + `<div class="wrap">
     <h3>Casiers et zones</h3>
-    ${S.casiers.map(c => `<div class="item" data-act="editcas" data-id="${c.id}"><span style="font-size:20px">${c.rangees?'🗄️':'📦'}</span><div class="main"><div class="t">${esc(c.nom)}</div><div class="s">${c.rangees ? `${c.rangees} rangées × ${c.colonnes} colonnes (${c.rangees*c.colonnes} places)` : 'Zone libre'}</div></div><span class="mini">›</span></div>`).join('')}
-    <button class="btn" data-act="newcas">＋ Ajouter un casier ou une zone</button>
+    ${S.casiers.map(c => `<div class="item" data-act="editcas" data-id="${c.id}"><span style="font-size:20px">${STYLES[styleOf(c)].i}</span><div class="main"><div class="t">${esc(c.nom)}</div><div class="s">${c.rangees ? `${STYLES[styleOf(c)].l} · ${c.rangees} étages × ${c.colonnes} (${c.rangees*c.colonnes} places)` : 'Zone libre'}</div></div><span class="mini">›</span></div>`).join('')}
+    <button class="btn" data-act="newcas">＋ Ajouter un meuble ou une zone</button>
     <h3>Sauvegarde</h3>
     <div class="card"><div class="mini">Tes données sont enregistrées uniquement sur cet appareil (rien n'est envoyé sur GitHub). Fais une sauvegarde de temps en temps, dans Fichiers ou iCloud Drive.</div>
       <button class="btn p" data-act="export">Exporter une sauvegarde (.json)</button>
@@ -395,7 +510,7 @@ function vReglages(){
     <div class="card mini">Dans Safari : bouton <b>Partager</b> → <b>Sur l'écran d'accueil</b>. L'appli s'ouvre alors en plein écran et fonctionne hors connexion (pratique à la cave !).</div>
     <h3>Zone sensible</h3>
     <button class="btn d" data-act="wipe">Tout effacer</button>
-    <p class="note" style="text-align:center">Ma Cave · v1.0</p>
+    <p class="note" style="text-align:center">Ma Cave · v1.1</p>
   </div>`;
 }
 
@@ -418,8 +533,8 @@ function openDetail(id, k){
       ${v.note ? `<div class="kv"><span>Note</span><span class="stars">${'★'.repeat(v.note)}${'☆'.repeat(5-v.note)}</span></div>` : ''}
     </div>
     ${v.commentaire ? `<div class="card" style="white-space:pre-wrap">${esc(v.commentaire)}</div>` : ''}
-    ${c && c.rangees && (v.cases||[]).length ? `<div class="card"><b>${esc(c.nom)}</b> <span class="mini">${k ? '— emplacement ' + cellLabel(k) + ' sélectionné' : '— touche une bouteille pour la choisir'}</span>${gridHTML(c, {hl:v.id, hlk:k})}</div>` : ''}
-    <button class="btn p" data-act="boire" data-id="${v.id}"${k ? ` data-k="${k}"` : ''}${v.qte < 1 ? ' disabled' : ''}>🍷 Boire une bouteille${k ? ' (' + cellLabel(k) + ')' : ''}</button>
+    ${c && c.rangees && (v.cases||[]).length ? `<div class="card"><b>${esc(c.nom)}</b> <span class="mini">${k ? '— ' + cellLabel(k, c) + ' sélectionnée' : '— elle clignote ici'}</span>${drawCasier(c, {hl:v.id, hlk:k})}</div>` : ''}
+    <button class="btn p" data-act="boire" data-id="${v.id}"${k ? ` data-k="${k}"` : ''}${v.qte < 1 ? ' disabled' : ''}>🍷 Boire une bouteille${k ? ' (' + cellLabel(k, c) + ')' : ''}</button>
     <div class="btns"><button class="btn" data-act="plus1" data-id="${v.id}">＋ 1 bouteille</button><button class="btn" data-act="edit" data-id="${v.id}">Modifier</button></div>
     <button class="btn d" data-act="del" data-id="${v.id}">Supprimer cette référence</button>`;
   openSheet(h);
@@ -469,7 +584,7 @@ function renderFGrid(){
   const el = $('#fgrid'); if (!el || !FS) return;
   const c = getC(FS.casierId);
   if (!c || !c.rangees) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="card"><div class="mini">Touche les emplacements où tu ranges ces bouteilles (${FS.sel.size} sélectionné${FS.sel.size>1?'s':''}${FS.sel.size ? ' : ' + [...FS.sel].map(cellLabel).join(', ') : ''})</div>${gridHTML(c, {mode:'form', exceptId:FS.id, sel:FS.sel})}</div>`;
+  el.innerHTML = `<div class="card"><div class="mini">Touche les places où tu ranges ces bouteilles (${FS.sel.size} sélectionnée${FS.sel.size>1?'s':''}${FS.sel.size ? ' : ' + slotsText(c, [...FS.sel]) : ''})</div>${drawCasier(c, {mode:'form', exceptId:FS.id, sel:FS.sel})}</div>`;
 }
 function saveForm(){
   const g = id => $('#' + id).value.trim();
@@ -488,23 +603,33 @@ function saveForm(){
 }
 
 function openCas(id){
-  const c = id ? getC(id) : {nom:'Casier ' + (S.casiers.length + 1), rangees:6, colonnes:8};
-  CS = {id, grille: !id || c.rangees > 0};
-  const h = `<h2>${id ? 'Modifier' : 'Nouveau casier'}</h2>
-    <label class="f">Nom</label><input id="c_nom" class="in" value="${esc(c.nom)}" placeholder="ex. Casier cave gauche, Cave à vin cuisine…">
-    <label class="f">Type</label><div class="seg"><button type="button" data-act="ctype" data-v="1" class="${CS.grille?'on':''}">🗄️ Casier en grille</button><button type="button" data-act="ctype" data-v="0" class="${!CS.grille?'on':''}">📦 Zone libre (carton, placard…)</button></div>
-    <div id="c_dims" style="${CS.grille?'':'display:none'}"><div class="grid2">
-      <div><label class="f">Rangées (lignes A, B, C…)</label><input id="c_r" class="in" inputmode="numeric" value="${c.rangees || 6}"></div>
-      <div><label class="f">Colonnes (1, 2, 3…)</label><input id="c_c" class="in" inputmode="numeric" value="${c.colonnes || 8}"></div>
-    </div><div class="note">Rangée A = en haut. Max 26 rangées × 30 colonnes.</div></div>
+  const c = id ? getC(id) : {nom:'Casier ' + (S.casiers.length + 1), rangees:6, colonnes:8, style:'bois', sens:'haut'};
+  CS = {id, style: id ? styleOf(c) : 'bois', sens: c.sens || 'haut'};
+  const h = `<h2>${id ? 'Modifier' : 'Nouveau meuble'}</h2>
+    <label class="f">Nom</label><input id="c_nom" class="in" value="${esc(c.nom)}" placeholder="ex. Casier cave gauche, Cave électrique cuisine…">
+    <label class="f">Type de meuble</label><div class="seg" id="c_style">${Object.entries(STYLES).map(([k,s]) => `<button type="button" data-act="cstyle" data-v="${k}" class="${CS.style===k?'on':''}">${s.i} ${s.l}</button>`).join('')}</div>
+    <div id="c_dims" style="${CS.style!=='libre'?'':'display:none'}"><div class="grid2">
+      <div><label class="f">Nombre d'étages</label><input id="c_r" class="in" inputmode="numeric" value="${c.rangees || 6}"></div>
+      <div><label class="f">Bouteilles par étage</label><input id="c_c" class="in" inputmode="numeric" value="${c.colonnes || 8}"></div>
+    </div>
+    <label class="f">Numérotation des étages</label><div class="seg" id="c_sens"><button type="button" data-act="csens" data-v="haut" class="${CS.sens==='haut'?'on':''}">Étage 1 en haut</button><button type="button" data-act="csens" data-v="bas" class="${CS.sens==='bas'?'on':''}">Étage 1 en bas</button></div>
+    <div class="note">Max 26 étages × 30 bouteilles. Les places sont numérotées de gauche à droite.</div>
+    <div id="c_prev"></div></div>
     <div class="btns"><button class="btn" data-act="close">Annuler</button><button class="btn p" data-act="csave">Enregistrer</button></div>
-    ${id ? `<button class="btn d" data-act="cdel" data-id="${id}">Supprimer ce casier</button>` : ''}`;
+    ${id ? `<button class="btn d" data-act="cdel" data-id="${id}">Supprimer ce meuble</button>` : ''}`;
   openSheet(h);
+  casPreview();
+}
+function casPreview(){
+  const el = $('#c_prev'); if (!el || !CS) return;
+  const r = Math.min(26, Math.max(1, parseInt($('#c_r').value) || 1)), co = Math.min(30, Math.max(1, parseInt($('#c_c').value) || 1));
+  el.innerHTML = CS.style === 'libre' ? '' : `<label class="f">Aperçu</label><div class="card" style="pointer-events:none">${drawCasier({id:'__apercu', rangees:r, colonnes:co, style:CS.style, sens:CS.sens}, {mini:0})}</div>`;
 }
 function saveCas(){
   const nom = $('#c_nom').value.trim(); if (!nom) { toast('Donne un nom au casier'); return; }
   let r = 0, co = 0;
-  if (CS.grille) {
+  const style = CS.style, sens = CS.sens;
+  if (style !== 'libre') {
     r = Math.min(26, Math.max(1, parseInt($('#c_r').value) || 0));
     co = Math.min(30, Math.max(1, parseInt($('#c_c').value) || 0));
   }
@@ -512,9 +637,9 @@ function saveCas(){
     const out = S.vins.filter(v => v.casierId === CS.id).flatMap(v => (v.cases||[]).filter(k => { const [a,b] = k.split(',').map(Number); return a >= r || b >= co; }));
     if (out.length && !confirm(`${plural(out.length,'bouteille')} se trouve${out.length>1?'nt':''} hors de la nouvelle grille et ${out.length>1?'seront marquées':'sera marquée'} « sans emplacement ». Continuer ?`)) return;
     S.vins.filter(v => v.casierId === CS.id).forEach(v => v.cases = (v.cases||[]).filter(k => { const [a,b] = k.split(',').map(Number); return a < r && b < co; }));
-    Object.assign(getC(CS.id), {nom, rangees:r, colonnes:co});
-  } else S.casiers.push({id:uid(), nom, rangees:r, colonnes:co});
-  save(); closeSheet(); render(); toast('Casier enregistré');
+    Object.assign(getC(CS.id), {nom, rangees:r, colonnes:co, style, sens});
+  } else S.casiers.push({id:uid(), nom, rangees:r, colonnes:co, style, sens});
+  save(); closeSheet(); render(); toast('Meuble enregistré');
 }
 
 /* ---------- Actions ---------- */
@@ -541,7 +666,7 @@ function download(name, text, type){
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
 function exportCSV(){
-  const cols = [['Domaine','domaine'],['Cuvée','cuvee'],['Couleur',v=>COUL[v.couleur]?.l],['Région','region'],['Appellation','appellation'],['Millésime','millesime'],['Quantité','qte'],['Casier',v=>getC(v.casierId)?.nom],['Emplacements',v=>(v.cases||[]).map(cellLabel).join(' ')],['Précision','emplacement'],['Prix',v=>v.prix===''?'':String(v.prix).replace('.',',')],['Boire de','boireDe'],["Boire jusqu'à",'boireJusqua'],['Note','note'],['Commentaire','commentaire']];
+  const cols = [['Domaine','domaine'],['Cuvée','cuvee'],['Couleur',v=>COUL[v.couleur]?.l],['Région','region'],['Appellation','appellation'],['Millésime','millesime'],['Quantité','qte'],['Casier',v=>getC(v.casierId)?.nom],['Emplacements',v=>{ const c = getC(v.casierId); return c && (v.cases||[]).length ? slotsText(c, v.cases) : ''; }],['Précision','emplacement'],['Prix',v=>v.prix===''?'':String(v.prix).replace('.',',')],['Boire de','boireDe'],["Boire jusqu'à",'boireJusqua'],['Note','note'],['Commentaire','commentaire']];
   const q = x => '"' + String(x ?? '').replace(/"/g, '""') + '"';
   const rows = [cols.map(c => q(c[0])).join(';')].concat(S.vins.map(v => cols.map(([,f]) => q(typeof f === 'function' ? f(v) : v[f])).join(';')));
   download(`cave-${new Date().toISOString().slice(0,10)}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
@@ -581,17 +706,19 @@ document.addEventListener('click', e => {
     case 'cellempty': {
       const c = getC(b.dataset.c), k = b.dataset.k;
       const cand = S.vins.filter(v => v.qte > (v.cases||[]).length && (v.casierId === c.id || !v.casierId)).sort((x,y) => cmp(x.domaine,y.domaine));
-      openSheet(`<h2>${esc(c.nom)} · ${cellLabel(k)}</h2><div class="mini">Emplacement vide</div>
+      openSheet(`<h2>${esc(c.nom)}</h2><div class="mini">${cellLabel(k, c).replace('Ét.', 'Étage ').replace(' n°', ', place n°')} — vide</div>
         <button class="btn p" data-act="newhere" data-c="${c.id}" data-k="${k}">＋ Ajouter un nouveau vin ici</button>
         ${cand.length ? `<h3>Ou y ranger une bouteille déjà en cave</h3>` + cand.map(v => `<div class="item" data-act="placer" data-id="${v.id}" data-c="${c.id}" data-k="${k}"><span class="dot" style="background:${colOf(v)}"></span><div class="main"><div class="t">${esc(v.domaine)}</div><div class="s">${esc([v.cuvee, v.appellation, v.millesime].filter(Boolean).join(' · '))}</div></div><span class="mini">${v.qte - (v.cases||[]).length} à placer</span></div>`).join('') : ''}`);
       break;
     }
     case 'newhere': openForm(null, {casierId:b.dataset.c, cell:b.dataset.k}); break;
-    case 'placer': { const v = getV(id); v.casierId = b.dataset.c; v.cases = (v.cases||[]).concat(b.dataset.k); save(); closeSheet(); render(); toast(`Rangée en ${cellLabel(b.dataset.k)}`); break; }
+    case 'placer': { const v = getV(id); v.casierId = b.dataset.c; v.cases = (v.cases||[]).concat(b.dataset.k); save(); closeSheet(); render(); toast(`Rangée : ${cellLabel(b.dataset.k, getC(b.dataset.c))}`); break; }
+    case 'goto': { const el = document.getElementById('cas-' + id); if (el) el.scrollIntoView({behavior:'smooth', block:'start'}); break; }
     // casiers
     case 'newcas': openCas(null); break;
     case 'editcas': openCas(id); break;
-    case 'ctype': CS.grille = b.dataset.v === '1'; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); $('#c_dims').style.display = CS.grille ? '' : 'none'; break;
+    case 'cstyle': CS.style = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); $('#c_dims').style.display = CS.style !== 'libre' ? '' : 'none'; casPreview(); break;
+    case 'csens': CS.sens = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); casPreview(); break;
     case 'csave': saveCas(); break;
     case 'cdel': {
       const c = getC(id), n = sum(S.vins.filter(v => v.casierId === id).map(v => v.qte));
@@ -611,6 +738,7 @@ document.addEventListener('click', e => {
 
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { F.q = e.target.value; renderList(); }
+  else if (e.target.id === 'c_r' || e.target.id === 'c_c') casPreview();
 });
 document.addEventListener('change', e => {
   const t = e.target;
